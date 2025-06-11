@@ -1,6 +1,6 @@
 # Codeforces Contest Notifier (Node.js)
 
-A simple Node.js script to get desktop notifications for upcoming Codeforces contests on Arch Linux.
+A simple Node.js script to get desktop notifications for upcoming Codeforces contests on Linux using Codeforces API.
 
 ## Features
 
@@ -11,9 +11,8 @@ A simple Node.js script to get desktop notifications for upcoming Codeforces con
 
 ## Requirements
 
-* Node.js (v14+ recommended)
-* npm (Node Package Manager)  
-* An Arch Linux desktop environment (for desktop notifications via `node-notifier`)
+* Node.js
+* npm (Node Package Manager) 
 
 ## Installation & Setup
 
