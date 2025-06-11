@@ -1,0 +1,153 @@
+// --- Imports ---
+const notifier = require('node-notifier');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+const axios = require('axios'); // <-- NEW: Import Axios instead of node-fetch
+
+// --- config ---
+const notified_contests_file = path.join(os.homedir(), '.codeforces_notified_contests_js.json');
+const notification_windows_inminutes = 60;
+const polling_interval = 1800 * 1000;
+
+// ... (other helper functions like load_notified_contest, save_notified_contest, send_desktop_notification remain the same) ...
+
+/**
+ * Loads previously notified contest IDs from a file.
+ * @returns {Set<number>} A set of contest IDs.
+ */
+function load_notified_contest() {
+    if (fs.existsSync(notified_contests_file)) {
+        try {
+            const data = fs.readFileSync(notified_contests_file, 'utf8');
+            return new Set(JSON.parse(data));
+        } catch (e) {
+            // file might be empty or corrupted, no biggie, start fresh
+            console.warn(`[${new Date().toLocaleString()}] Warning: ${notified_contests_file} is corrupted or empty. Starting fresh. Error: ${e.message}`);
+            return new Set();
+        }
+    }
+    return new Set(); // no file? no past notifications then
+}
+
+/**
+ * Saves current notified contest IDs to a file.
+ * @param {Set<number>} contest_ids - The set of contest IDs to save.
+ */
+function save_notified_contest(contest_ids) {
+    try {
+        fs.writeFileSync(notified_contests_file, JSON.stringify(Array.from(contest_ids)), 'utf8');
+    } catch (e) {
+        console.error(`[${new Date().toLocaleString()}] Error saving notified contests: ${e.message}`);
+    }
+}
+
+/**
+ * Fetches upcoming contests from the Codeforces API using Axios.
+ * @returns {Promise<Array<Object>>} A promise that resolves to an array of contest objects.
+ */
+async function get_upcomimg_contests() {
+    const url = "https://codeforces.com/api/contest.list";
+
+    try {
+        // --- CHANGE HERE: Using axios.get instead of fetch ---
+        const response = await axios.get(url, {
+            timeout: 10000 // Axios timeout is in milliseconds
+        });
+
+        // Axios automatically parses JSON into response.data
+        const data = response.data;
+
+        if (data.status === 'OK') {
+            return data.result.filter(contest => contest.phase === 'BEFORE');
+        } else {
+            console.error(`[${new Date().toLocaleString()}] Codeforces API error: ${data.comment || 'No comment provided'}`);
+            return [];
+        }
+    }
+    catch (e) {
+        // Axios error handling is often more structured
+        if (axios.isAxiosError(e)) {
+            if (e.response) {
+                // The request was made and the server responded with a status code
+                // that falls out of the range of 2xx
+                console.error(`[${new Date().toLocaleString()}] Codeforces API error (Axios response): ${e.response.status} - ${e.response.data.comment || JSON.stringify(e.response.data)}`);
+            } else if (e.request) {
+                // The request was made but no response was received
+                console.error(`[${new Date().toLocaleString()}] Network error (Axios request): No response received. ${e.message}`);
+            } else {
+                // Something else happened while setting up the request
+                console.error(`[${new Date().toLocaleString()}] Error setting up Axios request: ${e.message}`);
+            }
+        } else {
+            // General error
+            console.error(`[${new Date().toLocaleString()}] Network or API error: ${e.message}`);
+        }
+        return [];
+    }
+}
+
+function send_desktop_notification(title, message) {
+    notifier.notify(
+        {
+            title: title,
+            message: message,
+            sound: true, // make some noise
+            wait: true, // notification stays until you click it
+        },
+        function (err, response) {
+            if (err) {
+                console.error(`[${new Date().toLocaleString()}] Failed to send notification: ${err}`);
+            } else {
+                console.log(`[${new Date().toLocaleString()}] Sent notification: ${title} - ${message}`);
+            }
+        }
+    );
+}
+
+async function main() {
+    let notified_contest_ids = load_notified_contest();
+
+    console.log(`[${new Date().toLocaleString()}] Codeforces Notifier started. Polling every ${polling_interval / 1000} seconds.`);
+    console.log(`[${new Date().toLocaleString()}] Loaded previously notified contest:`, notified_contest_ids);
+
+    const check_contest = async () => {
+        const contests = await get_upcomimg_contests();
+        const current_time = new Date();
+        let newly_notified = false;
+
+        for (const contest of contests) {
+            const contest_id = contest.id;
+            const contest_name = contest.name;
+            const start_time_seconds = contest.startTimeSeconds;
+            const start_date_time = new Date(start_time_seconds * 1000);
+
+            const time_remaining_ms = start_date_time.getTime() - current_time.getTime();
+            const time_remaining_minutes = time_remaining_ms / (1000 * 60);
+
+            if (time_remaining_minutes > 0 && time_remaining_minutes <= notification_windows_inminutes && !notified_contest_ids.has(contest_id)) {
+                const notification_message = (
+                    `Codeforces contest '${contest_name}' starts in ${Math.round(time_remaining_minutes)} minutes!`
+                );
+                send_desktop_notification('Upcoming Codeforces Contest!', notification_message);
+                notified_contest_ids.add(contest_id);
+                newly_notified = true;
+            }
+
+            if (time_remaining_minutes <= 0 && notified_contest_ids.has(contest_id)) {
+                notified_contest_ids.delete(contest_id);
+                newly_notified = true;
+            }
+        }
+
+        if (newly_notified) {
+            save_notified_contest(notified_contest_ids);
+            console.log(`[${new Date().toLocaleString()}] Updated notified contests list.`);
+        }
+    };
+
+    await check_contest();
+    setInterval(check_contest, polling_interval);
+}
+
+main();
